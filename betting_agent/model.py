@@ -108,15 +108,17 @@ class PoissonModel:
         df["weight"] = np.exp(-DIXON_COLES_XI * df["days_ago"])
 
         # Use xG when available (better measure of underlying performance than actual goals)
+        # pandas itertuples() silently renames columns with leading underscores,
+        # so use non-underscore names for the goals columns used in the NLL.
         if "home_xg" in df.columns:
-            df["_g_h"] = df["home_xg"].fillna(df["home_goals"]).round().clip(0, MAX_GOALS).astype(int)
-            df["_g_a"] = df["away_xg"].fillna(df["away_goals"]).round().clip(0, MAX_GOALS).astype(int)
+            df["fit_g_h"] = df["home_xg"].fillna(df["home_goals"]).round().clip(0, MAX_GOALS).astype(int)
+            df["fit_g_a"] = df["away_xg"].fillna(df["away_goals"]).round().clip(0, MAX_GOALS).astype(int)
             self._xg_matches = int(df["home_xg"].notna().sum())
             log.info("  Using xG for %d/%d matches (%.0f%%).",
                      self._xg_matches, len(df), self._xg_matches / len(df) * 100)
         else:
-            df["_g_h"] = df["home_goals"]
-            df["_g_a"] = df["away_goals"]
+            df["fit_g_h"] = df["home_goals"]
+            df["fit_g_a"] = df["away_goals"]
             self._xg_matches = 0
 
         # Parameter layout:
@@ -188,7 +190,13 @@ class PoissonModel:
         away_win = float(np.triu(mat, 1).sum())   # rows < cols
         draw = float(np.trace(mat))
 
-        return {"home_win": home_win, "draw": draw, "away_win": away_win}
+        return {
+            "home_win": home_win,
+            "draw": draw,
+            "away_win": away_win,
+            "exp_home_goals": round(lam_h, 2),
+            "exp_away_goals": round(lam_a, 2),
+        }
 
     def predict_ou(
         self,
@@ -258,7 +266,7 @@ class PoissonModel:
             ai = self._team_index[row.away_team]
             lam_h = np.exp(mu + attack[hi] + defence[ai] + home_adv)
             lam_a = np.exp(mu + attack[ai] + defence[hi])
-            g_h, g_a = int(row._g_h), int(row._g_a)
+            g_h, g_a = int(row.fit_g_h), int(row.fit_g_a)
             tau = _tau(g_h, g_a, lam_h, lam_a, rho)
             if tau <= 0:
                 nll += 1e6 * row.weight

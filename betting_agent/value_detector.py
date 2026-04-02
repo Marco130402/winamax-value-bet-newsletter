@@ -108,6 +108,9 @@ def analyze_match(
         except Exception:
             match_date = commence[:10]
 
+        exp_goals = round(
+            model_probs.get("exp_home_goals", 0) + model_probs.get("exp_away_goals", 0), 1
+        )
         bets.append(
             {
                 "match": f"{winamax_row['home_team']} vs {winamax_row['away_team']}",
@@ -122,6 +125,7 @@ def analyze_match(
                 "winamax_implied_pct": round(winamax_implied * 100, 1),
                 "consensus_implied_pct": round(consensus_implied * 100, 1) if consensus_implied else None,
                 "consensus_edge_pct": consensus_edge,
+                "exp_goals": exp_goals,
             }
         )
     return bets
@@ -131,6 +135,7 @@ def _analyze_ou(
     row: pd.Series,
     model: PoissonModel,
     injury_adj: dict[str, float] | None,
+    model_probs: dict[str, float] | None = None,
 ) -> list[dict]:
     """Check Over/Under 2.5 for value bets on a single match row from totals_df."""
     home = row["home_team"]
@@ -149,9 +154,9 @@ def _analyze_ou(
         match_date = commence[:10]
 
     bets = []
-    for direction, odd_col, label in [
-        ("over",  "over_odds",  "Over 2.5"),
-        ("under", "under_odds", "Under 2.5"),
+    for direction, odd_col, bm_col, label in [
+        ("over",  "over_odds",  "over_bookmaker",  "Over 2.5"),
+        ("under", "under_odds", "under_bookmaker", "Under 2.5"),
     ]:
         odd = row.get(odd_col)
         if not odd or pd.isna(odd):
@@ -160,6 +165,11 @@ def _analyze_ou(
         ev = _ev(prob, float(odd))
         if ev < EV_THRESHOLD:
             continue
+        exp_goals = round(
+            (model_probs or {}).get("exp_home_goals", 0)
+            + (model_probs or {}).get("exp_away_goals", 0),
+            1,
+        )
         bets.append({
             "match":                  f"{home} vs {away}",
             "home_team":              home,
@@ -168,11 +178,13 @@ def _analyze_ou(
             "date":                   match_date,
             "outcome":                label,
             "winamax_odd":            round(float(odd), 2),
+            "bookmaker":              row.get(bm_col, ""),
             "model_prob":             round(prob * 100, 1),
             "model_ev_pct":           round(ev * 100, 1),
             "winamax_implied_pct":    round(1 / float(odd) * 100, 1),
             "consensus_implied_pct":  None,
             "consensus_edge_pct":     None,
+            "exp_goals":              exp_goals,
         })
     return bets
 
@@ -244,7 +256,7 @@ def find_all_value_bets(
         # ── Over/Under 2.5 bets ───────────────────────────────────────────────
         totals_row = totals_lookup.get(row["match_id"])
         if totals_row is not None:
-            all_bets.extend(_analyze_ou(totals_row, model, injury_adj))
+            all_bets.extend(_analyze_ou(totals_row, model, injury_adj, model_probs))
 
     all_bets.sort(key=lambda b: b["model_ev_pct"], reverse=True)
     log.info("Found %d value bet(s) (%d 1X2, %d O/U).",

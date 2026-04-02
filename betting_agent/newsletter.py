@@ -21,11 +21,19 @@ def _format_bet(bet: dict) -> str:
     stake = bet.get("kelly_stake_pct")
     stake_line = f"\n📐 Stake: <b>{stake:.2f}% of bankroll</b>" if stake else ""
 
+    exp_goals = bet.get("exp_goals")
+    goals_line = f"\n⚽ Model expects: <b>{exp_goals} goals total</b>" if exp_goals else ""
+
+    bookmaker = bet.get("bookmaker") or "Winamax"
+    # Convert raw API key to readable name (e.g. "pinnacle" → "Pinnacle")
+    bookmaker_display = bookmaker.replace("_", " ").title()
+
     return (
         f"<b>{bet['match']}</b> — {bet['date']}\n"
-        f"Outcome: <b>{bet['outcome']}</b> @ {bet['winamax_odd']} (Winamax)\n"
+        f"Outcome: <b>{bet['outcome']}</b> @ {bet['winamax_odd']} ({bookmaker_display})\n"
         f"Model prob: {bet['model_prob']}% | EV: <b>+{bet['model_ev_pct']}%</b>"
         + consensus_line
+        + goals_line
         + stake_line
     )
 
