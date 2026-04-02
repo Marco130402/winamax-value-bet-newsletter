@@ -18,6 +18,8 @@ API-Football free tier: 100 requests/day — ample for our use case
 (3 leagues × ~5 fixtures/round × 2 teams = ~30 requests max).
 """
 
+from __future__ import annotations
+
 import logging
 import os
 from datetime import datetime, timezone, timedelta

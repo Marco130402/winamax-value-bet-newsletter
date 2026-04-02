@@ -71,7 +71,7 @@ def run_pipeline(dry_run: bool = False) -> None:
                 league_name, len(df),
             )
             continue
-        model = PoissonModel()
+        model = PoissonModel(league_name=league_name)
         try:
             model.fit(df)
             models[league_name] = model

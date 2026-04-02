@@ -10,22 +10,17 @@ _LEAGUE_EMOJI = {
 
 
 def _format_bet(bet: dict) -> str:
-    model_line = ""
-    if bet["model_available"] and bet["model_prob"] is not None:
-        model_line = (
-            f"Model prob: {bet['model_prob']}% | "
-            f"Model EV: <b>+{bet['model_ev_pct']}%</b>\n"
-        )
-    else:
-        model_line = "<i>Model: N/A (consensus-only signal)</i>\n"
+    consensus_line = ""
+    if bet.get("consensus_implied_pct") is not None:
+        edge = bet.get("consensus_edge_pct")
+        edge_str = f" | Market edge: {edge:+.1f}pp" if edge is not None else ""
+        consensus_line = f"\nMarket consensus: {bet['consensus_implied_pct']}% implied{edge_str}"
 
     return (
         f"<b>{bet['match']}</b> — {bet['date']}\n"
         f"Outcome: <b>{bet['outcome']}</b> @ {bet['winamax_odd']} (Winamax)\n"
-        + model_line
-        + f"Consensus: {bet['consensus_implied_pct']}% | "
-        f"Winamax: {bet['winamax_implied_pct']}% | "
-        f"Edge: {bet['consensus_edge_pct']}pp"
+        f"Model prob: {bet['model_prob']}% | Model EV: <b>+{bet['model_ev_pct']}%</b>"
+        + consensus_line
     )
 
 
@@ -40,8 +35,8 @@ def format_newsletter(value_bets: list[dict], run_date: str) -> str:
     header = (
         f"<b>Winamax Value Bets — {run_date}</b>\n\n"
         "<b>Methodology</b>\n"
-        "Bets must pass BOTH: (1) Poisson/Dixon-Coles model EV ≥ 4%, "
-        "(2) Winamax implied prob lags market consensus by ≥ 5pp.\n"
+        "Bets flagged by Poisson/Dixon-Coles model EV ≥ 5% against Winamax odds. "
+        "Consensus market implied probability shown for context.\n"
     )
 
     # Group bets by league, preserving the league order from config
@@ -61,10 +56,8 @@ def format_newsletter(value_bets: list[dict], run_date: str) -> str:
         sections.append(section)
 
     total = len(value_bets)
-    n_model = sum(1 for b in value_bets if b["model_available"])
     footer = (
-        f"\n\n<i>{total} value bet{'s' if total != 1 else ''} found "
-        f"({n_model} model-confirmed, {total - n_model} consensus-only). "
+        f"\n\n<i>{total} value bet{'s' if total != 1 else ''} found. "
         "Data via The Odds API + football-data.org.</i>\n"
         "<i>Not financial advice. Bet responsibly.</i>"
     )

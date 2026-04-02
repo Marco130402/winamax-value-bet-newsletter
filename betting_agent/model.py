@@ -13,6 +13,8 @@ Matches are time-weighted with w = exp(-xi * days_ago) so that recent
 results have more influence than old ones.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 from datetime import datetime, timezone
@@ -26,7 +28,9 @@ from .config import CACHE_DIR, DIXON_COLES_XI, MAX_GOALS, MIN_MATCHES_FOR_MODEL
 
 log = logging.getLogger(__name__)
 
-_PARAMS_CACHE = CACHE_DIR / "model_params.json"
+def _params_cache_path(league_name: str) -> Path:
+    safe = league_name.lower().replace(" ", "_")
+    return CACHE_DIR / f"model_params_{safe}.json"
 
 
 def _tau(g_h: int, g_a: int, lam_h: float, lam_a: float, rho: float) -> float:
@@ -63,7 +67,8 @@ def _score_matrix(lam_h: float, lam_a: float, rho: float, max_goals: int = MAX_G
 class PoissonModel:
     """Dixon-Coles Poisson model with temporal weighting."""
 
-    def __init__(self) -> None:
+    def __init__(self, league_name: str = "default") -> None:
+        self._league_name = league_name
         self._teams: list[str] = []
         self._team_index: dict[str, int] = {}
         self._params: np.ndarray | None = None
@@ -216,15 +221,16 @@ class PoissonModel:
             "teams": self._teams,
             "params": self._params.tolist(),
         }
-        with open(_PARAMS_CACHE, "w") as f:
+        with open(_params_cache_path(self._league_name), "w") as f:
             json.dump(data, f)
 
     def _load_cache(self, n_teams: int) -> bool:
         """Return True if cached params were loaded successfully."""
-        if not _PARAMS_CACHE.exists():
+        cache_path = _params_cache_path(self._league_name)
+        if not cache_path.exists():
             return False
         try:
-            with open(_PARAMS_CACHE) as f:
+            with open(cache_path) as f:
                 data = json.load(f)
             if data["n_matches"] != self._n_matches or data["teams"] != self._teams:
                 return False

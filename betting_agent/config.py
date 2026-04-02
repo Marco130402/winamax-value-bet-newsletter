@@ -37,12 +37,21 @@ DEF_CONCEDE_WEIGHT = 0.15   # fraction of opponent lambda increase per key defen
 # ── Bookmakers ────────────────────────────────────────────────────────────────
 # Winamax is intentionally excluded from the consensus pool so we can compare
 # its odds against the rest of the market.
-BOOKMAKERS_CONSENSUS = ["bet365", "unibet", "betclic", "pinnacle", "betway"]
-BOOKMAKER_WINAMAX = "winamax"
+BOOKMAKERS_CONSENSUS = [
+    "pinnacle",       # sharpest market — best reference for true probability
+    "unibet_fr",
+    "unibet_nl",
+    "unibet_se",
+    "betclic_fr",
+    "williamhill",
+    "marathonbet",
+    "betsson",
+]
+BOOKMAKER_WINAMAX = "winamax_fr"
 
 # ── Value detection thresholds ────────────────────────────────────────────────
-EV_THRESHOLD = 0.04            # minimum expected value (4%) from the Poisson model
-CONSENSUS_DIFF_THRESHOLD = 0.05  # Winamax implied prob must lag consensus by ≥5pp
+EV_THRESHOLD = 0.05            # minimum expected value (5%) from the Poisson model
+# Consensus is shown in the newsletter as context but does not gate bets
 
 # ── Model parameters ──────────────────────────────────────────────────────────
 DIXON_COLES_XI = 0.0018        # time-decay rate (half-life ≈385 days)

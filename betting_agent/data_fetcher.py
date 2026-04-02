@@ -1,5 +1,7 @@
 """Fetch and cache historical match results from football-data.org."""
 
+from __future__ import annotations
+
 import logging
 import time
 from datetime import datetime, timezone, timedelta
@@ -52,11 +54,24 @@ def _parse_matches(raw_matches: list[dict]) -> pd.DataFrame:
     return df.sort_values("date").reset_index(drop=True)
 
 
-def _fetch_season(fd_code: str, season_year: int, api_key: str) -> pd.DataFrame:
-    """Fetch all finished matches for a given season year."""
+def _fetch_season(fd_code: str, season_year: int, api_key: str) -> pd.DataFrame | None:
+    """
+    Fetch all finished matches for a given season year.
+    Returns None if the season is not accessible on the current API plan (403).
+    """
     log.info("Fetching %s season %d from football-data.org …", fd_code, season_year)
     path = f"/competitions/{fd_code}/matches?season={season_year}&status=FINISHED"
-    data = _fd_get(path, api_key)
+    try:
+        data = _fd_get(path, api_key)
+    except requests.exceptions.HTTPError as exc:
+        if exc.response is not None and exc.response.status_code == 403:
+            log.warning(
+                "Season %d for %s is not accessible on the free tier — skipping.",
+                season_year, fd_code,
+            )
+            time.sleep(_RATE_LIMIT_SLEEP)
+            return None
+        raise
     matches = data.get("matches", [])
     time.sleep(_RATE_LIMIT_SLEEP)
     return _parse_matches(matches)
@@ -87,12 +102,17 @@ def load_or_update_cache(league_name: str, fd_code: str, api_key: str) -> pd.Dat
     current_season = now.year if now.month >= 7 else now.year - 1
 
     if not path.exists():
-        # Cold start: fetch two complete past seasons + current season
-        log.info("Cold start for %s — fetching %d seasons.", league_name, _SEASONS_ON_COLD_START + 1)
+        # Cold start: attempt to fetch past seasons + current, skip any blocked by the free tier
+        log.info("Cold start for %s — attempting %d seasons.", league_name, _SEASONS_ON_COLD_START + 1)
         frames = []
         for offset in range(_SEASONS_ON_COLD_START, -1, -1):
             yr = current_season - offset
-            frames.append(_fetch_season(fd_code, yr, api_key))
+            result = _fetch_season(fd_code, yr, api_key)
+            if result is not None and not result.empty:
+                frames.append(result)
+        if not frames:
+            log.error("No season data retrieved for %s — check your API plan.", league_name)
+            return pd.DataFrame(columns=["date", "home_team", "away_team", "home_goals", "away_goals"])
         df = pd.concat(frames, ignore_index=True).drop_duplicates()
     else:
         # Incremental update: re-fetch only the current season
