@@ -73,6 +73,7 @@ class PoissonModel:
         self._team_index: dict[str, int] = {}
         self._params: np.ndarray | None = None
         self._n_matches: int = 0
+        self._xg_matches: int = 0
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -82,7 +83,9 @@ class PoissonModel:
 
         Parameters
         ----------
-        df : DataFrame with columns date, home_team, away_team, home_goals, away_goals
+        df : DataFrame with columns date, home_team, away_team, home_goals, away_goals.
+             If home_xg/away_xg columns are present, uses rounded xG instead of
+             actual goals for the Poisson likelihood (better signal, less noise).
         """
         if len(df) < MIN_MATCHES_FOR_MODEL:
             raise ValueError(
@@ -103,6 +106,18 @@ class PoissonModel:
         df["date"] = pd.to_datetime(df["date"]).dt.date
         df["days_ago"] = df["date"].apply(lambda d: (today - d).days)
         df["weight"] = np.exp(-DIXON_COLES_XI * df["days_ago"])
+
+        # Use xG when available (better measure of underlying performance than actual goals)
+        if "home_xg" in df.columns:
+            df["_g_h"] = df["home_xg"].fillna(df["home_goals"]).round().clip(0, MAX_GOALS).astype(int)
+            df["_g_a"] = df["away_xg"].fillna(df["away_goals"]).round().clip(0, MAX_GOALS).astype(int)
+            self._xg_matches = int(df["home_xg"].notna().sum())
+            log.info("  Using xG for %d/%d matches (%.0f%%).",
+                     self._xg_matches, len(df), self._xg_matches / len(df) * 100)
+        else:
+            df["_g_h"] = df["home_goals"]
+            df["_g_a"] = df["away_goals"]
+            self._xg_matches = 0
 
         # Parameter layout:
         # [attack_0 … attack_{n-1}, defence_0 … defence_{n-1}, home_adv, mu, rho]
@@ -175,6 +190,47 @@ class PoissonModel:
 
         return {"home_win": home_win, "draw": draw, "away_win": away_win}
 
+    def predict_ou(
+        self,
+        home_team: str,
+        away_team: str,
+        threshold: float = 2.5,
+        injury_adjustments: dict[str, float] | None = None,
+    ) -> dict[str, float] | None:
+        """
+        Predict Over/Under probabilities for total goals in a match.
+
+        Returns {"over": float, "under": float} or None if either team is unknown.
+        Uses the same score matrix (with Dixon-Coles tau correction) as predict().
+        """
+        if self._params is None:
+            raise RuntimeError("Model has not been fitted yet.")
+        if home_team not in self._team_index or away_team not in self._team_index:
+            return None
+
+        lam_h, lam_a = self._lambdas(home_team, away_team)
+
+        if injury_adjustments:
+            lam_h *= injury_adjustments.get("home_attack", 1.0)
+            lam_h *= injury_adjustments.get("away_defence", 1.0)
+            lam_a *= injury_adjustments.get("away_attack", 1.0)
+            lam_a *= injury_adjustments.get("home_defence", 1.0)
+
+        n = len(self._teams)
+        rho = self._params[2 * n + 2]
+        mat = _score_matrix(lam_h, lam_a, rho)
+
+        # Sum all scorelines where total goals exceeds the threshold
+        size = mat.shape[0]
+        over_prob = sum(
+            mat[i, j]
+            for i in range(size)
+            for j in range(size)
+            if i + j > threshold
+        )
+        over_prob = float(np.clip(over_prob, 0.0, 1.0))
+        return {"over": over_prob, "under": 1.0 - over_prob}
+
     # ── Internal helpers ──────────────────────────────────────────────────────
 
     def _lambdas(self, home: str, away: str) -> tuple[float, float]:
@@ -202,7 +258,7 @@ class PoissonModel:
             ai = self._team_index[row.away_team]
             lam_h = np.exp(mu + attack[hi] + defence[ai] + home_adv)
             lam_a = np.exp(mu + attack[ai] + defence[hi])
-            g_h, g_a = int(row.home_goals), int(row.away_goals)
+            g_h, g_a = int(row._g_h), int(row._g_a)
             tau = _tau(g_h, g_a, lam_h, lam_a, rho)
             if tau <= 0:
                 nll += 1e6 * row.weight
@@ -218,6 +274,7 @@ class PoissonModel:
     def _save_cache(self, n_teams: int) -> None:
         data = {
             "n_matches": self._n_matches,
+            "xg_matches": self._xg_matches,
             "teams": self._teams,
             "params": self._params.tolist(),
         }
@@ -232,10 +289,15 @@ class PoissonModel:
         try:
             with open(cache_path) as f:
                 data = json.load(f)
-            if data["n_matches"] != self._n_matches or data["teams"] != self._teams:
+            if (data["n_matches"] != self._n_matches
+                    or data["teams"] != self._teams
+                    or data.get("xg_matches", -1) != self._xg_matches):
                 return False
             self._params = np.array(data["params"])
-            log.info("Loaded model params from cache (%d matches).", self._n_matches)
+            log.info(
+                "Loaded model params from cache (%d matches, %d with xG).",
+                self._n_matches, self._xg_matches,
+            )
             return True
         except Exception as exc:
             log.warning("Could not load model cache: %s", exc)

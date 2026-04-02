@@ -143,7 +143,7 @@ def compute_injury_adjustments(
     league_name: str,
     home_team: str,
     away_team: str,
-    api_key: str,
+    api_key: str | None = None,
 ) -> dict[str, float]:
     """
     Return lambda adjustment multipliers for home and away teams.
@@ -168,8 +168,8 @@ def compute_injury_adjustments(
     if league_name == "Premier League":
         return compute_pl_injury_adjustments(home_team, away_team)
 
-    # Ligue 1 / La Liga: scrape sportsgambler.com (free, no key needed)
-    if league_name in ("Ligue 1", "La Liga"):
+    # Ligue 1 / La Liga / Bundesliga 2 / Eredivisie: scrape sportsgambler.com (free, no key needed)
+    if league_name in ("Ligue 1", "La Liga", "Bundesliga 2", "Eredivisie"):
         return compute_scraped_injury_adjustments(league_name, home_team, away_team)
 
     # Fallback: API-Football (requires paid plan for current season)

@@ -35,8 +35,10 @@ _HEADERS = {
 }
 
 _LEAGUE_URLS = {
-    "Ligue 1":  "https://www.sportsgambler.com/injuries/football/france-ligue-1/",
-    "La Liga":  "https://www.sportsgambler.com/injuries/football/spain-la-liga/",
+    "Ligue 1":      "https://www.sportsgambler.com/injuries/football/france-ligue-1/",
+    "La Liga":      "https://www.sportsgambler.com/injuries/football/spain-la-liga/",
+    "Bundesliga 2": "https://www.sportsgambler.com/injuries/football/germany-2-bundesliga/",
+    "Eredivisie":   "https://www.sportsgambler.com/injuries/football/netherlands-eredivisie/",
 }
 
 # CSS class on .inj-type span → absence probability

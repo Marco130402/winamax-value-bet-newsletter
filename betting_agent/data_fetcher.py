@@ -11,6 +11,7 @@ import pandas as pd
 import requests
 
 from .config import CACHE_DIR, LEAGUES, normalize_team
+from .xg_fetcher import get_xg_data
 
 log = logging.getLogger(__name__)
 
@@ -89,6 +90,29 @@ def _cache_is_fresh(path: Path) -> bool:
     return (datetime.now(tz=timezone.utc) - mtime) < timedelta(days=_CACHE_MAX_AGE_DAYS)
 
 
+def _merge_xg(df: pd.DataFrame, league_name: str, seasons: list[int]) -> pd.DataFrame:
+    """Merge xG data from Understat into the match DataFrame (left join on date+teams)."""
+    xg_df = get_xg_data(league_name, seasons)
+    if xg_df.empty:
+        return df
+
+    # Drop stale xG columns before re-merging
+    df = df.drop(columns=["home_xg", "away_xg"], errors="ignore")
+
+    df["_date_key"] = df["date"].dt.strftime("%Y-%m-%d")
+    xg_df["_date_key"] = xg_df["date"].dt.strftime("%Y-%m-%d")
+
+    df = df.merge(
+        xg_df[["_date_key", "home_team", "away_team", "home_xg", "away_xg"]],
+        on=["_date_key", "home_team", "away_team"],
+        how="left",
+    ).drop(columns=["_date_key"])
+
+    xg_count = int(df["home_xg"].notna().sum())
+    log.info("  [%s] xG enrichment: %d/%d matches.", league_name, xg_count, len(df))
+    return df
+
+
 def load_or_update_cache(league_name: str, fd_code: str, api_key: str) -> pd.DataFrame:
     """Return historical results DataFrame for a league, updating cache if stale."""
     path = _cache_path(league_name)
@@ -100,13 +124,13 @@ def load_or_update_cache(league_name: str, fd_code: str, api_key: str) -> pd.Dat
 
     now = datetime.now(tz=timezone.utc)
     current_season = now.year if now.month >= 7 else now.year - 1
+    seasons = list(range(current_season - _SEASONS_ON_COLD_START, current_season + 1))
 
     if not path.exists():
         # Cold start: attempt to fetch past seasons + current, skip any blocked by the free tier
         log.info("Cold start for %s — attempting %d seasons.", league_name, _SEASONS_ON_COLD_START + 1)
         frames = []
-        for offset in range(_SEASONS_ON_COLD_START, -1, -1):
-            yr = current_season - offset
+        for yr in seasons:
             result = _fetch_season(fd_code, yr, api_key)
             if result is not None and not result.empty:
                 frames.append(result)
@@ -125,6 +149,7 @@ def load_or_update_cache(league_name: str, fd_code: str, api_key: str) -> pd.Dat
         )
 
     df = df.sort_values("date").reset_index(drop=True)
+    df = _merge_xg(df, league_name, seasons)
     df.to_csv(path, index=False)
     log.info("Saved %d matches for %s to cache.", len(df), league_name)
     return df

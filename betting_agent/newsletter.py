@@ -6,6 +6,8 @@ _LEAGUE_EMOJI = {
     "Ligue 1": "🇫🇷",
     "La Liga": "🇪🇸",
     "Premier League": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+    "Bundesliga 2": "🇩🇪",
+    "Eredivisie": "🇳🇱",
 }
 
 

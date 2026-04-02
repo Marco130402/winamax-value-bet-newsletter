@@ -17,7 +17,7 @@ def _get_odds(odds_key: str, api_key: str) -> list[dict]:
     params = {
         "apiKey": api_key,
         "regions": "eu",
-        "markets": "h2h",
+        "markets": "h2h,totals",   # fetch both in one request (1 credit total)
         "oddsFormat": "decimal",
     }
     resp = requests.get(url, params=params, timeout=30)
@@ -72,21 +72,73 @@ def _parse_events(events: list[dict], league_name: str) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def fetch_all_leagues(api_key: str) -> pd.DataFrame:
-    """Return a flat DataFrame of odds for all leagues from relevant bookmakers."""
-    frames = []
+def _parse_totals(events: list[dict], league_name: str) -> pd.DataFrame:
+    """Parse Winamax Over/Under 2.5 odds from events list."""
+    rows = []
+    for event in events:
+        home = normalize_team(event["home_team"])
+        away = normalize_team(event["away_team"])
+
+        for bm in event.get("bookmakers", []):
+            if bm["key"].lower() != BOOKMAKER_WINAMAX:
+                continue
+            for market in bm.get("markets", []):
+                if market["key"] != "totals":
+                    continue
+                over_odds = under_odds = None
+                for outcome in market["outcomes"]:
+                    if abs(outcome.get("point", 0) - 2.5) > 0.01:
+                        continue  # only 2.5 line
+                    if outcome["name"] == "Over":
+                        over_odds = float(outcome["price"])
+                    elif outcome["name"] == "Under":
+                        under_odds = float(outcome["price"])
+                if over_odds and under_odds:
+                    rows.append({
+                        "match_id":      event["id"],
+                        "league":        league_name,
+                        "home_team":     home,
+                        "away_team":     away,
+                        "commence_time": event["commence_time"],
+                        "over_odds":     over_odds,
+                        "under_odds":    under_odds,
+                    })
+    if not rows:
+        return pd.DataFrame(
+            columns=["match_id", "league", "home_team", "away_team",
+                     "commence_time", "over_odds", "under_odds"]
+        )
+    return pd.DataFrame(rows)
+
+
+def fetch_all_leagues(api_key: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Return (h2h_df, totals_df) for all leagues from relevant bookmakers.
+
+    h2h_df  : Winamax + consensus bookmaker 1X2 odds, one row per bookmaker-match
+    totals_df: Winamax Over/Under 2.5 odds, one row per match
+    """
+    h2h_frames: list[pd.DataFrame] = []
+    totals_frames: list[pd.DataFrame] = []
+
     for league_name, cfg in LEAGUES.items():
         events = _get_odds(cfg["odds_key"], api_key)
         if not events:
             log.warning("No events returned for %s.", league_name)
             continue
-        df = _parse_events(events, league_name)
-        log.info("Parsed %d bookmaker-match rows for %s.", len(df), league_name)
-        frames.append(df)
+        h2h = _parse_events(events, league_name)
+        totals = _parse_totals(events, league_name)
+        log.info(
+            "Parsed %d h2h rows, %d O/U rows for %s.",
+            len(h2h), len(totals), league_name,
+        )
+        h2h_frames.append(h2h)
+        if not totals.empty:
+            totals_frames.append(totals)
 
-    if not frames:
-        return pd.DataFrame()
-    return pd.concat(frames, ignore_index=True)
+    h2h_df = pd.concat(h2h_frames, ignore_index=True) if h2h_frames else pd.DataFrame()
+    totals_df = pd.concat(totals_frames, ignore_index=True) if totals_frames else pd.DataFrame()
+    return h2h_df, totals_df
 
 
 def get_winamax_odds(df: pd.DataFrame) -> pd.DataFrame:

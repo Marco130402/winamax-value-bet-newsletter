@@ -82,15 +82,17 @@ def run_pipeline(dry_run: bool = False) -> None:
 
     # ── 3. Fetch upcoming odds ────────────────────────────────────────────────
     log.info("Step 3/5: Fetching upcoming odds from The Odds API …")
-    odds_df = fetch_all_leagues(odds_api_key)
-    if odds_df.empty:
+    h2h_df, totals_df = fetch_all_leagues(odds_api_key)
+    if h2h_df.empty:
         log.error("No odds data retrieved. Aborting.")
         return
-    log.info("  %d bookmaker-match rows fetched.", len(odds_df))
+    log.info("  %d h2h rows, %d O/U rows fetched.", len(h2h_df), len(totals_df))
 
     # ── 4. Detect value bets ──────────────────────────────────────────────────
     log.info("Step 4/5: Detecting value bets …")
-    value_bets = find_all_value_bets(odds_df, models, injury_api_key=injury_api_key)
+    value_bets = find_all_value_bets(
+        h2h_df, models, totals_df=totals_df, injury_api_key=injury_api_key
+    )
     log.info("  %d value bet(s) found.", len(value_bets))
 
     # ── 4b. Kelly portfolio sizing ────────────────────────────────────────────

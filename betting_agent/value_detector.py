@@ -127,14 +127,69 @@ def analyze_match(
     return bets
 
 
+def _analyze_ou(
+    row: pd.Series,
+    model: PoissonModel,
+    injury_adj: dict[str, float] | None,
+) -> list[dict]:
+    """Check Over/Under 2.5 for value bets on a single match row from totals_df."""
+    home = row["home_team"]
+    away = row["away_team"]
+
+    ou_probs = model.predict_ou(home, away, injury_adjustments=injury_adj)
+    if ou_probs is None:
+        return []
+
+    commence = row.get("commence_time", "")
+    try:
+        match_date = datetime.fromisoformat(
+            commence.replace("Z", "+00:00")
+        ).strftime("%a %d %b")
+    except Exception:
+        match_date = commence[:10]
+
+    bets = []
+    for direction, odd_col, label in [
+        ("over",  "over_odds",  "Over 2.5"),
+        ("under", "under_odds", "Under 2.5"),
+    ]:
+        odd = row.get(odd_col)
+        if not odd or pd.isna(odd):
+            continue
+        prob = ou_probs[direction]
+        ev = _ev(prob, float(odd))
+        if ev < EV_THRESHOLD:
+            continue
+        bets.append({
+            "match":                  f"{home} vs {away}",
+            "home_team":              home,
+            "away_team":              away,
+            "league":                 row["league"],
+            "date":                   match_date,
+            "outcome":                label,
+            "winamax_odd":            round(float(odd), 2),
+            "model_prob":             round(prob * 100, 1),
+            "model_ev_pct":           round(ev * 100, 1),
+            "winamax_implied_pct":    round(1 / float(odd) * 100, 1),
+            "consensus_implied_pct":  None,
+            "consensus_edge_pct":     None,
+        })
+    return bets
+
+
 def find_all_value_bets(
     odds_df: pd.DataFrame,
     models: dict[str, PoissonModel],
+    totals_df: pd.DataFrame | None = None,
     injury_api_key: str | None = None,
 ) -> list[dict]:
     """
     Scan all upcoming matches and return up to MAX_BETS qualifying value bets,
     sorted by model EV descending.
+
+    Checks both 1X2 outcomes (from odds_df) and Over/Under 2.5 (from totals_df).
+    Injury adjustments are always applied for supported leagues (no API key needed
+    for PL / Ligue 1 / La Liga / Bundesliga 2 / Eredivisie).
     """
     if odds_df.empty:
         log.warning("No odds data — cannot detect value bets.")
@@ -150,6 +205,12 @@ def find_all_value_bets(
     # Left-join so we keep all Winamax matches even if no consensus data exists
     merged = winamax_df.merge(consensus_df, on="match_id", how="left", suffixes=("", "_con"))
 
+    # Build a fast lookup for totals odds: match_id → row
+    totals_lookup: dict[str, pd.Series] = {}
+    if totals_df is not None and not totals_df.empty:
+        for _, tr in totals_df.iterrows():
+            totals_lookup[tr["match_id"]] = tr
+
     all_bets: list[dict] = []
 
     for _, row in merged.iterrows():
@@ -164,26 +225,30 @@ def find_all_value_bets(
         if model is None:
             continue
 
-        injury_adj = None
-        if injury_api_key:
-            injury_adj = compute_injury_adjustments(league, home, away, injury_api_key)
+        # Always compute injury adjustments (scraper-based leagues need no API key)
+        injury_adj = compute_injury_adjustments(league, home, away, injury_api_key)
 
+        # ── 1X2 bets ──────────────────────────────────────────────────────────
         model_probs = model.predict(home, away, injury_adjustments=injury_adj)
         if model_probs is None:
             log.debug("Unknown team(s) in model: %s / %s", home, away)
-            continue
+        else:
+            consensus_series = None
+            if pd.notna(row.get("consensus_home_odds")):
+                consensus_series = row[["consensus_home_odds", "consensus_draw_odds", "consensus_away_odds"]]
 
-        # Build consensus series only if the row has consensus data
-        consensus_series = None
-        if pd.notna(row.get("consensus_home_odds")):
-            consensus_series = row[["consensus_home_odds", "consensus_draw_odds", "consensus_away_odds"]]
+            winamax_series = row[["home_team", "away_team", "league",
+                                   "commence_time", "home_odds", "draw_odds", "away_odds"]]
+            all_bets.extend(analyze_match(winamax_series, consensus_series, model_probs))
 
-        winamax_series = row[["home_team", "away_team", "league",
-                               "commence_time", "home_odds", "draw_odds", "away_odds"]]
-
-        bets = analyze_match(winamax_series, consensus_series, model_probs)
-        all_bets.extend(bets)
+        # ── Over/Under 2.5 bets ───────────────────────────────────────────────
+        totals_row = totals_lookup.get(row["match_id"])
+        if totals_row is not None:
+            all_bets.extend(_analyze_ou(totals_row, model, injury_adj))
 
     all_bets.sort(key=lambda b: b["model_ev_pct"], reverse=True)
-    log.info("Found %d value bet(s).", len(all_bets))
+    log.info("Found %d value bet(s) (%d 1X2, %d O/U).",
+             len(all_bets),
+             sum(1 for b in all_bets if b["outcome"] in ("Home Win", "Draw", "Away Win")),
+             sum(1 for b in all_bets if "2.5" in b["outcome"]))
     return all_bets[:MAX_BETS]
