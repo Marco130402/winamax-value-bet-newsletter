@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 
 from betting_agent.config import MIN_MATCHES_FOR_MODEL
 from betting_agent.data_fetcher import get_all_historical_data
+from betting_agent.kelly import compute_kelly_stakes
 from betting_agent.model import PoissonModel
 from betting_agent.newsletter import format_newsletter
 from betting_agent.odds_fetcher import fetch_all_leagues
@@ -91,6 +92,15 @@ def run_pipeline(dry_run: bool = False) -> None:
     log.info("Step 4/5: Detecting value bets …")
     value_bets = find_all_value_bets(odds_df, models, injury_api_key=injury_api_key)
     log.info("  %d value bet(s) found.", len(value_bets))
+
+    # ── 4b. Kelly portfolio sizing ────────────────────────────────────────────
+    if value_bets:
+        stakes = compute_kelly_stakes(value_bets)
+        for bet, stake in zip(value_bets, stakes):
+            bet["kelly_stake_pct"] = round(stake * 100, 2)
+    else:
+        for bet in value_bets:
+            bet["kelly_stake_pct"] = 0.0
 
     # ── 5. Format, log, and send newsletter ──────────────────────────────────
     log.info("Step 5/5: Sending newsletter …")

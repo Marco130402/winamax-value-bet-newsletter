@@ -53,6 +53,11 @@ BOOKMAKER_WINAMAX = "winamax_fr"
 EV_THRESHOLD = 0.05            # minimum expected value (5%) from the Poisson model
 # Consensus is shown in the newsletter as context but does not gate bets
 
+# ── Kelly staking ─────────────────────────────────────────────────────────────
+KELLY_FRACTION   = 0.25   # use quarter Kelly (scales full Kelly down by 75%)
+MAX_SINGLE_BET   = 0.05   # cap any single bet at 5% of bankroll
+MAX_TOTAL_EXPOSURE = 0.25 # cap total weekly exposure at 25% of bankroll
+
 # ── Model parameters ──────────────────────────────────────────────────────────
 DIXON_COLES_XI = 0.0018        # time-decay rate (half-life ≈385 days)
 MAX_GOALS = 8                  # score matrix dimension (covers 99.97% of outcomes)

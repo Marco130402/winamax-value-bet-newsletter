@@ -38,6 +38,7 @@ _FIELDNAMES = [
     "model_prob",
     "model_ev_pct",
     "consensus_edge_pct",
+    "kelly_stake_pct",
     "result",
 ]
 
@@ -65,7 +66,8 @@ def log_bets(value_bets: list[dict], week_date: str) -> None:
                     "winamax_odd": bet["winamax_odd"],
                     "model_prob": bet.get("model_prob", ""),
                     "model_ev_pct": bet.get("model_ev_pct", ""),
-                    "consensus_edge_pct": bet["consensus_edge_pct"],
+                    "consensus_edge_pct": bet.get("consensus_edge_pct", ""),
+                    "kelly_stake_pct": bet.get("kelly_stake_pct", ""),
                     "result": "",
                 }
             )
@@ -87,23 +89,38 @@ def print_report() -> None:
     pending = [r for r in rows if not r["result"]]
 
     total_bets = len(settled)
-    wins = [r for r in settled if r["result"] == "W"]
+    wins   = [r for r in settled if r["result"] == "W"]
     losses = [r for r in settled if r["result"] == "L"]
 
-    # Flat stake: 1 unit per bet
-    profit = sum(float(r["winamax_odd"]) - 1.0 for r in wins) - len(losses)
-    roi = (profit / total_bets * 100) if total_bets > 0 else 0.0
+    # Flat-stake ROI (1 unit per bet)
+    flat_profit = sum(float(r["winamax_odd"]) - 1.0 for r in wins) - len(losses)
+    flat_roi    = (flat_profit / total_bets * 100) if total_bets > 0 else 0.0
+
+    # Kelly-weighted ROI (stake = kelly_stake_pct % of bankroll)
+    kelly_pnl = 0.0
+    kelly_staked = 0.0
+    for r in settled:
+        try:
+            stake = float(r.get("kelly_stake_pct") or 0) / 100
+        except ValueError:
+            stake = 0.0
+        kelly_staked += stake
+        if r["result"] == "W":
+            kelly_pnl += stake * (float(r["winamax_odd"]) - 1.0)
+        else:
+            kelly_pnl -= stake
+    kelly_roi = (kelly_pnl / kelly_staked * 100) if kelly_staked > 0 else 0.0
 
     print("\n" + "=" * 50)
     print("  WINAMAX VALUE BET — PERFORMANCE REPORT")
     print("=" * 50)
-    print(f"  Settled bets : {total_bets}")
-    print(f"  Wins         : {len(wins)}")
-    print(f"  Losses       : {len(losses)}")
-    print(f"  Win rate     : {len(wins)/total_bets*100:.1f}%" if total_bets else "  Win rate     : —")
-    print(f"  Flat-stake P&L: {profit:+.2f} units")
-    print(f"  ROI           : {roi:+.1f}%")
-    print(f"  Pending bets  : {len(pending)}")
+    print(f"  Settled bets   : {total_bets}")
+    print(f"  Wins           : {len(wins)}")
+    print(f"  Losses         : {len(losses)}")
+    print(f"  Win rate       : {len(wins)/total_bets*100:.1f}%" if total_bets else "  Win rate       : —")
+    print(f"  Flat P&L       : {flat_profit:+.2f} units  (ROI {flat_roi:+.1f}%)")
+    print(f"  Kelly P&L      : {kelly_pnl:+.3f} bankroll (ROI {kelly_roi:+.1f}%)")
+    print(f"  Pending bets   : {len(pending)}")
     print("=" * 50 + "\n")
 
     if pending:
