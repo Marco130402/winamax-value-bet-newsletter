@@ -27,6 +27,8 @@ from functools import lru_cache
 
 import requests
 
+from .fpl_fetcher import compute_pl_injury_adjustments
+from .sportsgambler_scraper import compute_scraped_injury_adjustments
 from .config import (
     ASSIST_WEIGHT,
     DEF_CONCEDE_WEIGHT,
@@ -161,6 +163,18 @@ def compute_injury_adjustments(
         "home_defence": 1.0,
         "away_defence": 1.0,
     }
+
+    # Premier League: use free FPL API
+    if league_name == "Premier League":
+        return compute_pl_injury_adjustments(home_team, away_team)
+
+    # Ligue 1 / La Liga: scrape sportsgambler.com (free, no key needed)
+    if league_name in ("Ligue 1", "La Liga"):
+        return compute_scraped_injury_adjustments(league_name, home_team, away_team)
+
+    # Fallback: API-Football (requires paid plan for current season)
+    if not api_key:
+        return result
 
     league_cfg = LEAGUES.get(league_name)
     if not league_cfg:
