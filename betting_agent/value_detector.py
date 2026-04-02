@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 
 import pandas as pd
 
+from .injury_fetcher import compute_injury_adjustments
 from .config import (
     CONSENSUS_DIFF_THRESHOLD,
     EV_THRESHOLD,
@@ -143,6 +144,7 @@ def analyze_match(
 def find_all_value_bets(
     odds_df: pd.DataFrame,
     models: dict[str, PoissonModel],
+    injury_api_key: str | None = None,
 ) -> list[dict]:
     """
     Scan all upcoming matches and return up to MAX_BETS qualifying value bets,
@@ -177,7 +179,10 @@ def find_all_value_bets(
         model = models.get(league)
         model_probs = None
         if model is not None:
-            model_probs = model.predict(home, away)
+            injury_adj = None
+            if injury_api_key:
+                injury_adj = compute_injury_adjustments(league, home, away, injury_api_key)
+            model_probs = model.predict(home, away, injury_adjustments=injury_adj)
             if model_probs is None:
                 log.debug("Unknown team in model for %s vs %s — using consensus-only.", home, away)
 

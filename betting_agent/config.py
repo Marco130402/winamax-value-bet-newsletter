@@ -12,16 +12,27 @@ LEAGUES = {
     "Ligue 1": {
         "fd_code": "FL1",
         "odds_key": "soccer_france_ligue_one",
+        "apifootball_id": 61,   # API-Football league ID
     },
     "La Liga": {
         "fd_code": "PD",
         "odds_key": "soccer_spain_la_liga",
+        "apifootball_id": 140,
     },
     "Premier League": {
         "fd_code": "PL",
         "odds_key": "soccer_epl",
+        "apifootball_id": 39,
     },
 }
+
+# ── Injury model weights ──────────────────────────────────────────────────────
+# Combined contribution score = goals_per90 + ASSIST_WEIGHT * assists_per90
+ASSIST_WEIGHT = 0.6         # assists count 60% vs a goal (industry-standard proxy)
+# Maximum lambda reduction from absences — prevents absurd adjustments
+MAX_LAMBDA_REDUCTION = 0.40  # lambda floored at 60% of base value
+# Defensive: absent key CB/GK increases opponent's lambda_away (or lambda_home)
+DEF_CONCEDE_WEIGHT = 0.15   # fraction of opponent lambda increase per key defender out
 
 # ── Bookmakers ────────────────────────────────────────────────────────────────
 # Winamax is intentionally excluded from the consensus pool so we can compare

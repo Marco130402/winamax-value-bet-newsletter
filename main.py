@@ -2,8 +2,10 @@
 Weekly Winamax value-bet newsletter pipeline.
 
 Usage:
-    python main.py            # full run (fetches data, sends Telegram message)
-    python main.py --dry-run  # run without sending to Telegram (prints to stdout)
+    python main.py                 # full run (fetches data, sends Telegram message)
+    python main.py --dry-run       # run without sending to Telegram (prints to stdout)
+    python main.py --report        # print ROI performance report
+    python main.py --record-result # interactively record match results
 """
 
 import argparse
@@ -14,13 +16,14 @@ from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 
+from betting_agent.config import MIN_MATCHES_FOR_MODEL
 from betting_agent.data_fetcher import get_all_historical_data
 from betting_agent.model import PoissonModel
 from betting_agent.newsletter import format_newsletter
 from betting_agent.odds_fetcher import fetch_all_leagues
 from betting_agent.telegram_sender import send_message
+from betting_agent.tracker import log_bets, print_report, record_result_interactive
 from betting_agent.value_detector import find_all_value_bets
-from betting_agent.config import MIN_MATCHES_FOR_MODEL
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,8 +46,11 @@ def run_pipeline(dry_run: bool = False) -> None:
 
     fd_api_key = _require_env("FOOTBALL_DATA_API_KEY")
     odds_api_key = _require_env("THE_ODDS_API_KEY")
+    injury_api_key = os.getenv("API_FOOTBALL_KEY")  # optional — skipped if not set
     tg_token = _require_env("TELEGRAM_BOT_TOKEN")
     tg_chat_id = _require_env("TELEGRAM_CHAT_ID")
+    if not injury_api_key:
+        log.info("API_FOOTBALL_KEY not set — injury adjustment disabled.")
 
     run_date = datetime.now(tz=timezone.utc).strftime("%-d %B %Y")
     log.info("=== Pipeline start — %s ===", run_date)
@@ -83,12 +89,13 @@ def run_pipeline(dry_run: bool = False) -> None:
 
     # ── 4. Detect value bets ──────────────────────────────────────────────────
     log.info("Step 4/5: Detecting value bets …")
-    value_bets = find_all_value_bets(odds_df, models)
+    value_bets = find_all_value_bets(odds_df, models, injury_api_key=injury_api_key)
     log.info("  %d value bet(s) found.", len(value_bets))
 
-    # ── 5. Format and send newsletter ─────────────────────────────────────────
+    # ── 5. Format, log, and send newsletter ──────────────────────────────────
     log.info("Step 5/5: Sending newsletter …")
     message = format_newsletter(value_bets, run_date)
+    log_bets(value_bets, run_date)
 
     if dry_run:
         print("\n" + "=" * 60)
@@ -102,7 +109,17 @@ def run_pipeline(dry_run: bool = False) -> None:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run the Winamax value-bet newsletter pipeline.")
-    parser.add_argument("--dry-run", action="store_true", help="Print newsletter without sending.")
+    parser = argparse.ArgumentParser(description="Winamax value-bet newsletter pipeline.")
+    parser.add_argument("--dry-run", action="store_true", help="Print newsletter without sending to Telegram.")
+    parser.add_argument("--report", action="store_true", help="Print ROI performance report.")
+    parser.add_argument("--record-result", action="store_true", help="Interactively record match results.")
     args = parser.parse_args()
-    run_pipeline(dry_run=args.dry_run)
+
+    if args.report:
+        load_dotenv()
+        print_report()
+    elif args.record_result:
+        load_dotenv()
+        record_result_interactive()
+    else:
+        run_pipeline(dry_run=args.dry_run)

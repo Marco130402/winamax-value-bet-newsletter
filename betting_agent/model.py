@@ -127,9 +127,21 @@ class PoissonModel:
         self._save_cache(n)
         log.info("Model fitted on %d matches, %d teams.", len(df), n)
 
-    def predict(self, home_team: str, away_team: str) -> dict[str, float] | None:
+    def predict(
+        self,
+        home_team: str,
+        away_team: str,
+        injury_adjustments: dict[str, float] | None = None,
+    ) -> dict[str, float] | None:
         """
         Predict win/draw/loss probabilities for a match.
+
+        Parameters
+        ----------
+        home_team, away_team : canonical team names
+        injury_adjustments : optional dict with keys
+            home_attack, away_attack, home_defence, away_defence (all floats).
+            See injury_fetcher.compute_injury_adjustments() for details.
 
         Returns None if either team was not seen during training.
         """
@@ -141,6 +153,13 @@ class PoissonModel:
             return None
 
         lam_h, lam_a = self._lambdas(home_team, away_team)
+
+        if injury_adjustments:
+            lam_h *= injury_adjustments.get("home_attack", 1.0)
+            lam_h *= injury_adjustments.get("away_defence", 1.0)
+            lam_a *= injury_adjustments.get("away_attack", 1.0)
+            lam_a *= injury_adjustments.get("home_defence", 1.0)
+
         n = len(self._teams)
         rho = self._params[2 * n + 2]
 

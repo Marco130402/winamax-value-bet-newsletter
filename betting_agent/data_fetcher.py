@@ -15,7 +15,7 @@ log = logging.getLogger(__name__)
 _FD_BASE = "https://api.football-data.org/v4"
 _CACHE_MAX_AGE_DAYS = 3
 _RATE_LIMIT_SLEEP = 6.5   # 10 req/min limit → sleep ≥6s between calls
-_SEASONS_ON_COLD_START = 2  # how many completed seasons to back-fill
+_SEASONS_ON_COLD_START = 3  # how many completed seasons to back-fill
 
 
 def _fd_get(path: str, api_key: str) -> dict:
