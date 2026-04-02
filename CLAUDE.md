@@ -31,28 +31,35 @@ The pipeline runs in five sequential steps (see `main.py:run_pipeline`):
 
 3. **Odds fetch** (`betting_agent/odds_fetcher.py`) — calls The Odds API once per league, returns a flat DataFrame of all bookmaker odds. `BOOKMAKER_WINAMAX = "winamax_fr"` (not `"winamax"` — the API uses region-suffixed keys). Consensus pool is defined in `config.BOOKMAKERS_CONSENSUS`.
 
-4. **Value detection** (`betting_agent/value_detector.py`) — merges Winamax and consensus rows on `match_id`, then for each of 3 outcomes (home/draw/away) checks: model EV > `EV_THRESHOLD` AND consensus implied prob gap > `CONSENSUS_DIFF_THRESHOLD`. Both gates must pass. Returns top `MAX_BETS` sorted by EV.
+4. **Value detection** (`betting_agent/value_detector.py`) — merges Winamax and consensus rows on `match_id`, then for each of 3 outcomes (home/draw/away) checks model EV > `EV_THRESHOLD`. Model EV is the **sole qualifier**; consensus implied prob is attached as context in the newsletter but does not gate bets. Left-joins so Winamax matches without consensus data are still included. Returns top `MAX_BETS` sorted by EV.
 
-5. **Newsletter + tracker** (`betting_agent/newsletter.py`, `betting_agent/tracker.py`, `betting_agent/telegram_sender.py`) — formats HTML, logs bets to `data/bets_log.csv`, splits into ≤4096-char chunks and POSTs to Telegram Bot API.
+4b. **Kelly stake sizing** (`betting_agent/kelly.py`) — computes optimal bankroll fractions by maximising E[log(1 + Σ fᵢ·rᵢ)] across all 2^n outcome scenarios via scipy L-BFGS-B. Raw fractions are then scaled by `KELLY_FRACTION` (0.25), capped per bet at `MAX_SINGLE_BET` (5%), and proportionally rescaled if the total exceeds `MAX_TOTAL_EXPOSURE` (25%). Returns a list of fractions in bet order; each bet gets a `kelly_stake_pct` field.
 
-**Injury adjustment** (`betting_agent/injury_fetcher.py`) is optional (skipped if `API_FOOTBALL_KEY` not set). Fetches fixture injuries from API-Football, computes attack lambda reduction from current-season goals+assists per 90, and defence lambda boost from goals-conceded rate. Uses `@lru_cache` to avoid duplicate player stat requests within a session.
+5. **Newsletter + tracker** (`betting_agent/newsletter.py`, `betting_agent/tracker.py`, `betting_agent/telegram_sender.py`) — formats HTML (shows per-bet stake and total exposure), logs bets to `data/bets_log.csv` (including `kelly_stake_pct`), splits into ≤4096-char chunks and POSTs to Telegram Bot API. `--report` prints both flat-stake and Kelly-weighted ROI.
+
+**Injury adjustment** (`betting_agent/injury_fetcher.py`) is optional (skipped if `API_FOOTBALL_KEY` not set, but operates without it for the two main sources). Routes by league:
+- **Premier League** → `betting_agent/fpl_fetcher.py`: official FPL API (`fantasy.premierleague.com/api/bootstrap-static/`), no key required.
+- **Ligue 1 / La Liga** → `betting_agent/sportsgambler_scraper.py`: scrapes `sportsgambler.com/injuries/football/{league}/`, logs a warning if the fetch returns 0 players.
+- **Other leagues** → API-Football (paid; not currently used).
 
 ## Key constants (`betting_agent/config.py`)
 
 | Constant | Default | Effect |
 |---|---|---|
-| `EV_THRESHOLD` | 0.04 | Minimum model expected value to flag a bet |
-| `CONSENSUS_DIFF_THRESHOLD` | 0.05 | Minimum gap (pp) between consensus and Winamax implied prob |
+| `EV_THRESHOLD` | 0.05 | Minimum model expected value to flag a bet (sole qualifier) |
 | `DIXON_COLES_XI` | 0.0018 | Time-decay rate; half-life ≈385 days |
 | `MAX_BETS` | 10 | Max bets per newsletter |
 | `BOOKMAKER_WINAMAX` | `"winamax_fr"` | The Odds API key for Winamax |
+| `KELLY_FRACTION` | 0.25 | Scale raw Kelly fractions by this (quarter Kelly) |
+| `MAX_SINGLE_BET` | 0.05 | Hard cap per bet (5% of bankroll) |
+| `MAX_TOTAL_EXPOSURE` | 0.25 | Hard cap on total weekly exposure (25% of bankroll) |
 
 ## Environment variables (`.env`)
 
 ```
 FOOTBALL_DATA_API_KEY   # football-data.org — historical results
 THE_ODDS_API_KEY        # the-odds-api.com — live odds (500 credits/month free; ~7 used/week)
-API_FOOTBALL_KEY        # api-football.com — injuries/suspensions (optional, 100 req/day free)
+API_FOOTBALL_KEY        # api-football.com — injuries (optional; PL uses FPL API, L1/LL use scraper instead)
 TELEGRAM_BOT_TOKEN      # from @BotFather
 TELEGRAM_CHAT_ID        # numeric personal chat ID (get from /getUpdates)
 ```
